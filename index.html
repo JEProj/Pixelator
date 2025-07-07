@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Art with Custom Palette and Export</title>
+<style>
+  body, html {
+    height: 100%;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(270deg, #ff7e5f, #feb47b, #86a8e7, #91eae4);
+    background-size: 800% 800%;
+    animation: gradientShift 15s ease infinite;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+
+  @keyframes gradientShift {
+    0% {background-position:0% 50%;}
+    50% {background-position:100% 50%;}
+    100% {background-position:0% 50%;}
+  }
+
+  #pixelGrid {
+    display: grid;
+    margin-top: 20px;
+    image-rendering: pixelated;
+    background: rgba(255 255 255 / 0.85);
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    border-radius: 10px;
+    padding: 10px;
+    max-width: 100vw;
+    overflow: auto;
+  }
+  .pixel {
+    width: 10px;
+    height: 10px;
+  }
+  #controls {
+    margin: 10px 0;
+    background: rgba(255 255 255 / 0.85);
+    padding: 10px 15px;
+    border-radius: 10px;
+    box-shadow: 0 0 8px rgba(0,0,0,0.2);
+    max-width: 600px;
+    width: 100%;
+  }
+  label {
+    margin-right: 8px;
+  }
+  #customPaletteControls {
+    margin-top: 10px;
+    display: none;
+  }
+  #customColors {
+    margin-top: 5px;
+  }
+  .custom-color-swatch {
+    width: 25px;
+    height: 25px;
+    display: inline-block;
+    margin: 3px;
+    border: 1px solid #666;
+    cursor: pointer;
+  }
+  .custom-color-swatch:hover {
+    border-color: red;
+  }
+  #exportBtn {
+    margin-top: 10px;
+    padding: 8px 15px;
+    font-weight: bold;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #exportBtn:hover {
+    background-color: #45a049;
+  }
+</style>
+</head>
+<body>
+
+<h2 style="color:#222; text-shadow: 0 0 5px #fff;">Upload image and pixelate with a color palette</h2>
+<input type="file" id="imageLoader" accept="image/*" />
+
+<div id="controls">
+  <label for="resolutionRange">Pixelation Level:</label>
+  <input type="range" id="resolutionRange" min="2" max="50" value="10" />
+  <span id="resolutionValue">10</span> px
+  <br /><br />
+  <label for="paletteSelect">Choose Palette:</label>
+  <select id="paletteSelect">
+    <option value="default">Original Colors</option>
+    <option value="nes">NES 8-bit</option>
+    <option value="grayscale">Grayscale</option>
+    <option value="vga">VGA 16 Colors</option>
+    <option value="custom">Custom Palette</option>
+  </select>
+  
+  <div id="customPaletteControls">
+    <input type="color" id="customColorPicker" value="#ff0000" />
+    <button id="addColorBtn">Add Color</button>
+    <div id="customColors" title="Click a color to remove it"></div>
+  </div>
+
+  <button id="exportBtn" title="Export pixel art as PNG">Export PNG</button>
+</div>
+
+<div id="pixelGrid"></div>
+
+<script>
+  const imageLoader = document.getElementById('imageLoader');
+  const pixelGrid = document.getElementById('pixelGrid');
+  const resolutionRange = document.getElementById('resolutionRange');
+  const resolutionValue = document.getElementById('resolutionValue');
+  const paletteSelect = document.getElementById('paletteSelect');
+  const customPaletteControls = document.getElementById('customPaletteControls');
+  const customColorPicker = document.getElementById('customColorPicker');
+  const addColorBtn = document.getElementById('addColorBtn');
+  const customColorsDiv = document.getElementById('customColors');
+  const exportBtn = document.getElementById('exportBtn');
+
+  let currentImage = null;
+  let pixelSize = parseInt(resolutionRange.value);
+  let currentPalette = 'default';
+
+  const palettes = {
+    default: null,
+    nes: [
+      [124, 124, 124], [0, 0, 252], [0, 0, 188], [68, 40, 188],
+      [148, 0, 132], [168, 0, 32], [168, 16, 0], [136, 20, 0],
+      [80, 48, 0], [0, 120, 0], [0, 104, 0], [0, 88, 0],
+      [0, 64, 88], [0, 0, 0], [0, 0, 0], [0, 0, 0]
+    ],
+    grayscale: [
+      [0,0,0], [85,85,85], [170,170,170], [255,255,255]
+    ],
+    vga: [
+      [0,0,0], [0,0,170], [0,170,0], [0,170,170],
+      [170,0,0], [170,0,170], [170,85,0], [170,170,170],
+      [85,85,85], [85,85,255], [85,255,85], [85,255,255],
+      [255,85,85], [255,85,255], [255,255,85], [255,255,255]
+    ],
+    custom: []
+  };
+
+  function rgbToArray(rgbStr) {
+    const r = parseInt(rgbStr.substr(1,2),16);
+    const g = parseInt(rgbStr.substr(3,2),16);
+    const b = parseInt(rgbStr.substr(5,2),16);
+    return [r,g,b];
+  }
+
+  function updateCustomColorsUI() {
+    customColorsDiv.innerHTML = '';
+    for (let i = 0; i < palettes.custom.length; i++) {
+      const c = palettes.custom[i];
+      const swatch = document.createElement('div');
+      swatch.className = 'custom-color-swatch';
+      swatch.style.backgroundColor = `rgb(${c[0]},${c[1]},${c[2]})`;
+      swatch.title = 'Click to remove this color';
+      swatch.addEventListener('click', () => {
+        palettes.custom.splice(i, 1);
+        updateCustomColorsUI();
+        if (currentImage) drawPixels(currentImage, pixelSize, currentPalette);
+      });
+      customColorsDiv.appendChild(swatch);
+    }
+  }
+
+  resolutionRange.addEventListener('input', () => {
+    pixelSize = parseInt(resolutionRange.value);
+    resolutionValue.textContent = pixelSize;
+    if (currentImage) {
+      drawPixels(currentImage, pixelSize, currentPalette);
+    }
+  });
+
+  paletteSelect.addEventListener('change', () => {
+    currentPalette = paletteSelect.value;
+    if (currentPalette === 'custom') {
+      customPaletteControls.style.display = 'block';
+    } else {
+      customPaletteControls.style.display = 'none';
+    }
+    if (currentImage) {
+      drawPixels(currentImage, pixelSize, currentPalette);
+    }
+  });
+
+  addColorBtn.addEventListener('click', () => {
+    const newColor = rgbToArray(customColorPicker.value);
+    if (!palettes.custom.some(c => c[0] === newColor[0] && c[1] === newColor[1] && c[2] === newColor[2])) {
+      palettes.custom.push(newColor);
+      updateCustomColorsUI();
+      if (currentImage) drawPixels(currentImage, pixelSize, currentPalette);
+    }
+  });
+
+  imageLoader.addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = function(event) {
+      img.onload = () => {
+        currentImage = img;
+        drawPixels(img, pixelSize, currentPalette);
+      };
+      img.src = event.target.result;
+    };
+
+    reader.readAsDataURL(file);
+  });
+
+  exportBtn.addEventListener('click', () => {
+    if (!currentImage) {
+      alert('Please upload an image first.');
+      return;
+    }
+    exportPixelArt();
+  });
+
+  function drawPixels(img, pixelSize, paletteName) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const scaledWidth = Math.floor(img.width / pixelSize);
+    const scaledHeight = Math.floor(img.height / pixelSize);
+
+    canvas.width = scaledWidth;
+    canvas.height = scaledHeight;
+
+    ctx.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+
+    const imageData = ctx.getImageData(0, 0, scaledWidth, scaledHeight);
+    const data = imageData.data;
+
+    pixelGrid.innerHTML = '';
+    pixelGrid.style.gridTemplateColumns = `repeat(${scaledWidth}, ${pixelSize}px)`;
+    pixelGrid.style.gridTemplateRows = `repeat(${scaledHeight}, ${pixelSize}px)`;
+
+    const palette = palettes[paletteName];
+
+    for (let y = 0; y < scaledHeight; y++) {
+      for (let x = 0; x < scaledWidth; x++) {
+        const i = (y * scaledWidth + x) * 4;
+        let r = data[i];
+        let g = data[i + 1];
+        let b = data[i + 2];
+        const a = data[i + 3];
+
+        let color;
+        if (a === 0) {
+          color = 'transparent';
+        } else if (!palette) {
+          color = `rgb(${r},${g},${b})`;
+        } else if (palette.length === 0) {
+          color = `rgb(${r},${g},${b})`;
+        } else {
+          [r, g, b] = findClosestColor([r, g, b], palette);
+          color = `rgb(${r},${g},${b})`;
+        }
+
+        const pixel = document.createElement('div');
+        pixel.className = 'pixel';
+        pixel.style.width = pixelSize + 'px';
+        pixel.style.height = pixelSize + 'px';
+        pixel.style.backgroundColor = color;
+
+        pixelGrid.appendChild(pixel);
+      }
+    }
+  }
+
+  function exportPixelArt() {
+    const scaledWidth = Math.floor(currentImage.width / pixelSize);
+    const scaledHeight = Math.floor(currentImage.height / pixelSize);
+
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = scaledWidth;
+    exportCanvas.height = scaledHeight;
+    const ctx = exportCanvas.getContext('2d');
+
+    // Draw scaled down image to get pixel colors
+    ctx.drawImage(currentImage, 0, 0, scaledWidth, scaledHeight);
+    const imageData = ctx.getImageData(0, 0, scaledWidth, scaledHeight);
+    const data = imageData.data;
+
+    const palette = palettes[currentPalette];
+
+    // Replace each pixel with closest palette color
+    for (let y = 0; y < scaledHeight; y++) {
+      for (let x = 0; x < scaledWidth; x++) {
+        const i = (y * scaledWidth + x) * 4;
+        let r = data[i];
+        let g = data[i + 1];
+        let b = data[i + 2];
+        const a = data[i + 3];
+
+        if (a === 0) {
+          // transparent
+          data[i] = 0;
+          data[i+1] = 0;
+          data[i+2] = 0;
+          data[i+3] = 0;
+        } else if (palette && palette.length > 0) {
+          [r, g, b] = findClosestColor([r, g, b], palette);
+          data[i] = r;
+          data[i+1] = g;
+          data[i+2] = b;
+          data[i+3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    // Now create a new canvas to scale it back up for export
+    const exportScaleCanvas = document.createElement('canvas');
+    exportScaleCanvas.width = scaledWidth * pixelSize;
+    exportScaleCanvas.height = scaledHeight * pixelSize;
+    const exportCtx = exportScaleCanvas.getContext('2d');
+
+    // Disable smoothing to keep pixelated look
+    exportCtx.imageSmoothingEnabled = false;
+    exportCtx.drawImage(exportCanvas, 0, 0, exportScaleCanvas.width, exportScaleCanvas.height);
+
+    // Download
+    exportScaleCanvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'pixel-art.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  function findClosestColor(rgb, palette) {
+    let minDist = Infinity;
+    let closestColor = palette[0];
+
+    for (const c of palette) {
+      const dist = colorDistance(rgb, c);
+      if (dist < minDist) {
+        minDist = dist;
+        closestColor = c;
+      }
+    }
+    return closestColor;
+  }
+
+  function colorDistance(c1, c2) {
+    return Math.sqrt(
+      (c1[0] - c2[0]) ** 2 +
+      (c1[1] - c2[1]) ** 2 +
+      (c1[2] - c2[2]) ** 2
+    );
+  }
+</script>
+
+</body>
+</html>
